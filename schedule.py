@@ -77,6 +77,13 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
         title = row[2]
         scene = row[1]
 
+        # получаем, сколько сотрудников не хватает на смене
+        if not pd.isna(row[5]):
+            try:
+                number_employees = int(str(row[5]).strip())
+            except ValueError:
+                number_employees = None
+
         # остановка, если дошли до служебных строк
         if not pd.isna(title):
             if any(stop in str(title).strip().lower() for stop in STOP_TITLES):
@@ -104,9 +111,8 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
 
         seniors = sorted([name for col_idx, name in senior_cols.items() if is_work(row[col_idx])])
         regulars = sorted([name for col_idx, name in regular_cols.items() if is_work(row[col_idx])])
-        people = seniors + regulars
 
-        if not people:
+        if not seniors and not regulars:
             continue
 
         if current_date not in all_schedule:
@@ -115,7 +121,9 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
         all_schedule[current_date].append({
             "scene": scene_clean,
             "title": title_clean,
-            "people": people  # старшие первые, остальные по алфавиту
+            "seniors": seniors,
+            "regulars": regulars,
+            "number": number_employees
         })
 
     return all_schedule
@@ -141,8 +149,27 @@ if __name__ == "__main__":
     for date, shows in sorted_data.items():
         print(f"\n{date.upper()}")
         for show in shows:
-            print(f"\n{show['title']}")
-            print(f"Сцена: {show['scene']}")
-            print(f"Состав:")
-            for person in show['people']:
+            print(f"\n{show['scene']} {show['title']}") #выводит сцену и название спектакля
+            count_all = 0   #для подсчёта текущего количества сотрудников на смене
+            count_seniors = 0   #для подстчёта количества старших сотрудников на смене
+
+            #выводит старших сотрудников на смене
+            for person in show['seniors']: 
                 print(f"{person}")
+                count_seniors += 1
+                count_all += 1
+            print("\n", end='')
+
+            #выводит обычных сотрудников на смене
+            for person in show['regulars']:
+                print(f"{person}")
+                count_all += 1
+                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and person != show['regulars'][-1]:    #пустая строка через каждые 4 фамилии
+                    print("\n", end='')
+
+            #выводит "—", если есть нехватка сотрудников
+            for empty in range(show['number']):
+                print("—")
+                count_all += 1
+                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and empty != (show['number'] - 1):    #пустая строка через каждые 4 фамилии
+                    print("\n", end='')
