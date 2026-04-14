@@ -21,6 +21,11 @@ MONTHS_RU = {
     9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
 }
 
+DAYS = {
+    "пн": "понедельник", "вт": "вторник", "ср": "среда", "чт": "четверг",
+    "пт": "пятница", "сб": "суббота", "вс": "воскресенье"
+}
+
 def load_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
     response = requests.get(url)
@@ -37,11 +42,18 @@ def is_work(value):
         return False
     return str(value).strip() in ["1"]
 
+#получаем число
 def extract_day(date_value):
     try:
         return int(str(date_value).split()[0])
     except Exception:
+        return None
 
+#получаем день недели
+def extract_day_of_week(date_value):
+    try:
+        return str(date_value).split()[1]
+    except Exception:
         return None
 
 def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
@@ -98,6 +110,12 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             if day:
                 current_date = f"{day} {MONTHS_RU[month]}"
 
+        #день недели
+        if not pd.isna(row[0]):
+            day_of_week = extract_day_of_week(row[0])
+            if day_of_week in DAYS:
+                current_day = f"{DAYS[day_of_week]}"
+
         if not current_date:
             continue
         if pd.isna(title):
@@ -123,7 +141,8 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             "title": title_clean,
             "seniors": seniors,
             "regulars": regulars,
-            "number": number_employees
+            "number": number_employees,
+            "day of week": current_day
         })
 
     return all_schedule
@@ -147,7 +166,12 @@ if __name__ == "__main__":
     sorted_data = dict(sorted(data.items(), key=lambda x: int(x[0].split()[0])))
 
     for date, shows in sorted_data.items():
-        print(f"\n{date.upper()}")
+        if shows:
+            day_of_week = shows[0]['day of week']
+        else:
+            day_of_week = "ошибка!"
+        print(f"\n{date.lower()}, {day_of_week}")
+
         for show in shows:
             print(f"\n{show['scene']} {show['title']}") #выводит сцену и название спектакля
             count_all = 0   #для подсчёта текущего количества сотрудников на смене
