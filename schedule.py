@@ -18,12 +18,14 @@ except ImportError:
 MONTHS_RU = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
     5: "мая", 6: "июня", 7: "июля", 8: "августа",
-    9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"
-}
+    9: "сентября", 10: "октября", 11: "ноября", 12: "декабря"}
 
 DAYS = {
     "пн": "понедельник", "вт": "вторник", "ср": "среда", "чт": "четверг",
-    "пт": "пятница", "сб": "суббота", "вс": "воскресенье"
+    "пт": "пятница", "сб": "суббота", "вс": "воскресенье"}
+
+DEFAULT_TIME = {
+    "ОС": "17:10", "МС": "18:10", "НП": "17:20"
 }
 
 def load_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
@@ -121,14 +123,6 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
         if pd.isna(title):
             continue
 
-        title_clean = str(title).strip()
-        if "Как я стал художником" in title_clean:  #чтобы Художник адекватно выводился
-            title_clean = "\"Как я стал художником\""
-        if not title_clean:
-            continue
-
-        scene_clean = str(scene).strip() if not pd.isna(scene) else ""
-
         seniors = sorted([name for col_idx, name in senior_cols.items() if is_work(row[col_idx])])
         regulars = sorted([name for col_idx, name in regular_cols.items() if is_work(row[col_idx])])
 
@@ -137,6 +131,28 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
 
         if current_date not in all_schedule:
             all_schedule[current_date] = []
+        
+        #убираем время начала спектакля, если оно отлично от стандартного
+        scene_time = str(scene).split()
+        scene_clean = scene_time[0] if not pd.isna(scene) else ""
+
+        #определение времени начала смены
+        special_time = scene_time[1] if len(scene_time) > 1 else None
+        if not pd.isna(special_time):
+            hour = special_time.split(':')[0]
+            current_hour = int(hour) - 2
+            minutes = "10" if scene_clean != "НП" else "20"
+            current_time = str(current_hour) + ":" + minutes
+        else:
+            current_time = DEFAULT_TIME[scene_clean]
+
+        
+        title_clean = str(title).strip()
+        if "Как я стал художником" in title_clean:  #чтобы Художник адекватно выводился
+            title_clean = "\"Как я стал художником\""
+            current_time = "10:20; 13:20; 16:20"
+        if not title_clean:
+            continue
 
         all_schedule[current_date].append({
             "scene": scene_clean,
@@ -144,7 +160,8 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             "seniors": seniors,
             "regulars": regulars,
             "number": number_employees,
-            "day of week": current_day
+            "day of week": current_day,
+            "time": current_time
         })
 
     return all_schedule
@@ -175,7 +192,7 @@ if __name__ == "__main__":
         print(f"\n{date.lower()}, {day_of_week}")
 
         for show in shows:
-            print(f"\n{show['scene']} {show['title']}") #выводит сцену и название спектакля
+            print(f"\n{show['scene']} {show['time']} {show['title']}") #выводит сцену и название спектакля
             count_all = 0   #для подсчёта текущего количества сотрудников на смене
             count_seniors = 0   #для подстчёта количества старших сотрудников на смене
 
