@@ -40,7 +40,7 @@ def load_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
 def is_work(value):
     if pd.isna(value):
         return False
-    return str(value).strip() in ["1"]
+    return str(value).strip() in ["1","2"]
 
 #получаем число
 def extract_day(date_value):
@@ -122,6 +122,8 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             continue
 
         title_clean = str(title).strip()
+        if "Как я стал художником" in title_clean:  #чтобы Художник адекватно выводился
+            title_clean = "\"Как я стал художником\""
         if not title_clean:
             continue
 
