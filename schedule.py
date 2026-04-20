@@ -2,6 +2,9 @@ import subprocess
 import sys
 import io
 
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 try:
     import pandas as pd
 except ImportError:
@@ -13,8 +16,6 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
     import requests
-
-
 MONTHS_RU = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
     5: "мая", 6: "июня", 7: "июля", 8: "августа",
@@ -43,7 +44,6 @@ def is_work(value):
     if pd.isna(value):
         return False
     return str(value).strip() in ["1","2"]
-
 #получаем число
 def extract_day(date_value):
     try:
@@ -72,8 +72,6 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             name = str(name_row[col_idx]).strip()
             if name and name != "nan" and "Unnamed" not in name:
                 senior_cols[col_idx] = name
-
-    # обычные сотрудники
     regular_cols = {}
     for col_idx in range(9, 38):
         if col_idx < len(name_row):
@@ -106,7 +104,7 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             if any(stop in str(scene).strip().lower() for stop in STOP_TITLES):
                 break
 
-        # дата
+         # дата
         if not pd.isna(row[0]):
             day = extract_day(row[0])
             if day:
@@ -131,7 +129,7 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
 
         if current_date not in all_schedule:
             all_schedule[current_date] = []
-        
+
         #убираем время начала спектакля, если оно отлично от стандартного
         scene_time = str(scene).split()
         scene_clean = scene_time[0] if not pd.isna(scene) else ""
@@ -145,6 +143,7 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             current_time = str(current_hour) + ":" + minutes
         else:
             current_time = DEFAULT_TIME[scene_clean]
+
 
         
         title_clean = str(title).strip()
@@ -166,7 +165,6 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
 
     return all_schedule
 
-
 def get_actual_schedule() -> dict:
 
     # Чтобы сменить лист — надо менять current_gid и current_month
@@ -176,7 +174,6 @@ def get_actual_schedule() -> dict:
     current_month = 4
 
     return get_schedule_data(sheet_id, current_gid, current_month)
-
 
 #Тест
 if __name__ == "__main__":
@@ -197,7 +194,7 @@ if __name__ == "__main__":
             count_seniors = 0   #для подстчёта количества старших сотрудников на смене
 
             #выводит старших сотрудников на смене
-            for person in show['seniors']: 
+            for person in show['seniors']:
                 print(f"{person}")
                 count_seniors += 1
                 count_all += 1
@@ -207,12 +204,12 @@ if __name__ == "__main__":
             for person in show['regulars']:
                 print(f"{person}")
                 count_all += 1
-                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and person != show['regulars'][-1]:    #пустая строка через каждые 4 фамилии
+                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and person != show['regulars'][-1]:    
                     print("\n", end='')
 
             #выводит "—", если есть нехватка сотрудников
             for empty in range(show['number']):
                 print("—")
                 count_all += 1
-                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and empty != (show['number'] - 1):    #пустая строка через каждые 4 фамилии
+                if show['scene'] == "ОС" and (count_all - count_seniors)%4 == 0 and empty != (show['number'] - 1):    
                     print("\n", end='')
