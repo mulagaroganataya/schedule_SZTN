@@ -245,6 +245,7 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     context.bot_data['schedule_messages'] = {}
                 context.bot_data['schedule_messages'][date_part] = sent_msg.message_id
                 context.bot_data['schedule_messages'][date_part + '_text'] = day_schedule
+                context.bot_data['schedule_messages'][date_part + '_thread_id'] = SCHEDULE_THREAD_ID
 
                 # между отправкой сообщений с расписанием пауза 5 секунд
                 # нужно, чтобы телеграм не блокировал за флуд (~20 сообщений в минуту предел)
@@ -332,13 +333,19 @@ async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ Ошибка: не найдены данные о сообщении. Попробуйте заново.")
         return ConversationHandler.END
     
+    # используем thread_id темы для конкретного сообщегния, чтобы не завичсеть от глобального значения
+    schedule_messages = context.bot_data.get('schedule_messages', {})
+    saved_thread_id = schedule_messages.get(norm_date + '_thread_id')
+    if saved_thread_id is None:
+        saved_thread_id = SCHEDULE_THREAD_ID  
+    
     try:
-        # Редактируем сообщение в супергруппе
+        # редактируем сообщение в супергруппе
         await context.bot.edit_message_text(
             chat_id=SZTN_CHAT_ID,
             message_id=msg_id,
             text=new_text,
-            api_kwargs={'message_thread_id': SCHEDULE_THREAD_ID}
+            api_kwargs={'message_thread_id': saved_thread_id}
         )
         # Обновляем кеш в памяти
         context.bot_data['schedule_messages'][norm_date + '_text'] = new_text
@@ -414,7 +421,6 @@ async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    print(f"Получен текст: {repr(text)}")
 
     if context.user_data.get('waiting_for_report', False):
         await handle_report_message(update, context)
@@ -436,6 +442,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
 
+    # стандартное меню
     if text == "📅 Вывести расписание":
         await show_schedule(update, context)
     elif text == "📝 Сообщить об ошибке":
