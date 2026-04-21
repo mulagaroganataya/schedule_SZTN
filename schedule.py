@@ -43,6 +43,17 @@ def load_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(response.text), header=None)
     return df
 
+def load_second_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
+    url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+    response = requests.get(url)
+
+    if response.status_code != 200:
+        raise Exception(f"Ошибка загрузки: {response.status_code}")
+
+    response.encoding = "utf-8"
+    df = pd.read_csv(io.StringIO(response.text), header=None)
+    return df
+
 def is_work(value):
     if pd.isna(value):
         return False
@@ -177,6 +188,16 @@ def get_actual_schedule() -> dict:
     current_month = 4
 
     return get_schedule_data(sheet_id, current_gid, current_month)
+
+def get_second_table_data():
+    sheet_id = "1aqRvfpgweclLphhXs7Kbe0946oCP7q1hYvqdedqS30A"
+    gid = "0"
+    
+    #хвост
+    df2 = load_second_sheet_from_google(sheet_id, gid)
+    header_row = df2.iloc[0]
+
+    return df2
 
 #Тест
 if __name__ == "__main__":
