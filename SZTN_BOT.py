@@ -18,9 +18,13 @@ SCHEDULE_THREAD_ID = 6      #<-- сюда ID конкретной ветки
 
 # состояния для изменения (редактирования) расписания
 WAITING_DATE, WAITING_NEW_TEXT = range(2)
+# состояние ожидания нового id темы
+WAITING_THREAD_ID = range(3,4)
 
 # для хранения данных расписания в файле. Чтобы были не страшны перезапуски бота
 CACHE_FILE = Path(__file__).parent / "schedule_cache.json"
+#анал-но с конфигом
+CONFIG_FILE = Path(__file__).parent / "config.json"
 
 def load_cache():
     if CACHE_FILE.exists():
@@ -38,11 +42,35 @@ def save_cache(cache_data):
     except IOError as e:
         print(f"⚠️ Ошибка сохранения кеша: {e}")
 
+def load_config():
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            print("⚠️ Ошибка чтения config.json, используются значения по умолчанию")
+    return {"thread_id": 6}
+
+def save_config(config):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+    except IOError as e:
+        print(f"⚠️ Ошибка сохранения config.json: {e}")
+
 def get_main_keyboard():
     keyboard = [
         [KeyboardButton("📅 Вывести расписание")],
         [KeyboardButton("✍️ Изменить расписание")],
+        [KeyboardButton("⚙️ Настройки")],
         [KeyboardButton("📝 Сообщить об ошибке")]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_settings_keyboard():
+    keyboard = [
+        [KeyboardButton("🔧 Изменить тему для отправки сообщений")],
+        [KeyboardButton("🔙 Назад")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -50,6 +78,62 @@ def get_main_keyboard():
 def get_cancel_keyboard():
     keyboard = [[KeyboardButton("❌ Отмена")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def extract_thread_id_from_input(text: str):
+    text = text.strip()
+    if text.isdigit():
+        return int(text)
+    if "t.me/c/" in text:
+        parts = text.split('/')
+        try:
+            return int(parts[-1])
+        except (ValueError, IndexError):
+            pass
+    return None
+
+async def change_thread_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔧 Введите новый ID темы (число) или ссылку на сообщение в теме.\n"
+        "Примеры: 6  или  https://t.me/c/123456789/10",
+        reply_markup=get_cancel_keyboard()
+    )
+    return WAITING_THREAD_ID
+
+async def process_thread_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.strip()
+    if user_input == "❌ Отмена":
+        await cancel_change_thread(update, context)
+        return ConversationHandler.END
+
+    thread_id = extract_thread_id_from_input(user_input)
+    if thread_id is None:
+        await update.message.reply_text(
+            "❌ Не удалось распознать ID темы.\n"
+            "Введите число или ссылку вида https://t.me/c/123456789/10",
+            reply_markup=get_cancel_keyboard()
+        )
+        return WAITING_THREAD_ID
+
+    global SCHEDULE_THREAD_ID
+    SCHEDULE_THREAD_ID = thread_id
+
+    # сохраняем в config.json
+    config = load_config()
+    config["thread_id"] = thread_id
+    save_config(config)
+
+    await update.message.reply_text(
+        f"✅ ID темы успешно изменён на {thread_id}.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
+
+async def cancel_change_thread(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "❌ Изменение ID темы отменено.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
 
 def split_by_dates(text: str):
     """Разбивает расписание по датам"""
@@ -330,9 +414,26 @@ async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
+    print(f"Получен текст: {repr(text)}")
 
     if context.user_data.get('waiting_for_report', False):
         await handle_report_message(update, context)
+        return
+
+    # меню настроек
+    if context.user_data.get('in_settings', False):
+        if text == "🔙 Назад":
+            context.user_data['in_settings'] = False
+            await update.message.reply_text(
+                "Главное меню:",
+                reply_markup=get_main_keyboard()
+            )
+        else:
+            if text != "🔧 Изменить тему для отправки сообщений":
+                await update.message.reply_text(
+                    "Используйте кнопки меню настроек.",
+                    reply_markup=get_settings_keyboard()
+                )
         return
 
     if text == "📅 Вывести расписание":
@@ -341,12 +442,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await report_error(update, context)
     elif text == "✍️ Изменить расписание":
         return
+    elif text == "⚙️ Настройки":
+        context.user_data['in_settings'] = True
+        await update.message.reply_text(
+            "Меню настроек:",
+            reply_markup=get_settings_keyboard()
+        )
     else:
         await update.message.reply_text(
-            "Используйте кнопки внизу экрана:\n"
-            "📅 Вывести расписание\n"
-            "✍️ Изменить расписание\n"
-            "📝 Сообщить об ошибке",
+            "Используйте кнопки внизу экрана.",
+            #"📅 Вывести расписание\n"
+            #"✍️ Изменить расписание\n"
+            #"📝 Сообщить об ошибке",
             reply_markup=get_main_keyboard()
         )
 
@@ -364,6 +471,11 @@ app = Application.builder().token(BOT_TOKEN).build()
 app.bot_data['schedule_messages'] = load_cache()
 print(f"📦 Загружено {len(app.bot_data['schedule_messages'])} записей кеша")
 
+# загружаем информацию из config
+config = load_config()
+SCHEDULE_THREAD_ID = config.get("thread_id", 6)
+print(f"🔧 Загружен ID темы: {SCHEDULE_THREAD_ID}")
+
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("cancel", cancel_command))
 
@@ -378,6 +490,18 @@ edit_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel_edit)],
 )
 app.add_handler(edit_conv_handler)
+# неразобранная писанина заканчивается тут.
+
+# НОВОЕ. Надо для изменения thread_id
+# я пока не разбирал вот эту писанину:
+thread_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex('^🔧 Изменить тему для отправки сообщений$'), change_thread_start)],
+    states={
+        WAITING_THREAD_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_thread_input)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel_change_thread)],
+)
+app.add_handler(thread_conv_handler)
 # неразобранная писанина заканчивается тут.
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
