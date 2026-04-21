@@ -1,21 +1,24 @@
 import subprocess
 import sys
 import io
+import pandas as pd
+import requests
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
-try:
-    import pandas as pd
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
-    import pandas as pd
+#try:
+#    import pandas as pd
+#except ImportError:
+#    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+#    import pandas as pd
 
-try:
-    import requests
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
-    import requests
+#try:
+#    import requests
+#except ImportError:
+#    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+#    import requests
+
 MONTHS_RU = {
     1: "января", 2: "февраля", 3: "марта", 4: "апреля",
     5: "мая", 6: "июня", 7: "июля", 8: "августа",
@@ -73,7 +76,7 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
             if name and name != "nan" and "Unnamed" not in name:
                 senior_cols[col_idx] = name
     regular_cols = {}
-    for col_idx in range(9, 38):
+    for col_idx in range(9, 50):
         if col_idx < len(name_row):
             name = str(name_row[col_idx]).strip()
             if name and name != "nan" and "Unnamed" not in name:

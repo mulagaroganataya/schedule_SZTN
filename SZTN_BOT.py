@@ -3,17 +3,25 @@ import sys
 import os
 from pathlib import Path
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+import asyncio
+import re
 
 # Токен из переменных окружения (безопасно для сервера)
 BOT_TOKEN = "8649563055:AAHEJP6eXq-q0nOsrFe7PBUIZ6X_q9pWeOY"
 
 ADMIN_ID = 1698452613  # Вставьте свой Telegram ID
 PARSER_PATH = Path(__file__).parent / "schedule.py"
+SZTN_CHAT_ID = -1003918031419       #<-- сюда ID супергруппы (добавить "-100" в начало ID)
+SCHEDULE_THREAD_ID = 6      #<-- сюда ID конкретной ветки
+
+# состояния для изменения (редактирования) расписания
+WAITING_DATE, WAITING_NEW_TEXT = range(2)
 
 def get_main_keyboard():
     keyboard = [
         [KeyboardButton("📅 Вывести расписание")],
+        [KeyboardButton("✍️ Изменить расписание")],
         [KeyboardButton("📝 Сообщить об ошибке")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -56,9 +64,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 Привет! Я бот с расписанием.\n\n"
         "Используй кнопки внизу экрана:\n"
         "📅 Вывести расписание — получить расписание\n"
+        "✍️ Изменить расписание — отредактировать сообщение в группе\n"
         "📝 Сообщить об ошибке — написать администратору"
     )
     await update.message.reply_text(welcome_text, reply_markup=get_main_keyboard())
+
 async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     loading_msg = await update.message.reply_text("⏳ Загружаю расписание...")
 
@@ -112,12 +122,36 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 day_schedule = day_schedule[:4000] + "\n\n... (текст обрезан)"
 
             try:
-                await update.message.reply_text(day_schedule)
+                #await update.message.reply_text(day_schedule)   #заменить на:
+                sent_msg = await context.bot.send_message(
+                    chat_id=SZTN_CHAT_ID,
+                    message_thread_id=SCHEDULE_THREAD_ID,
+                    text=day_schedule
+                )
                 sent_count += 1
+                # сохраняем в кеш дату, текст сообщения и message_id
+                first_line = day_schedule.split('\n')[0].strip()
+                date_part = first_line.split(',')[0].strip().lower()
+                if 'schedule_messages' not in context.bot_data:
+                    context.bot_data['schedule_messages'] = {}
+                context.bot_data['schedule_messages'][date_part] = sent_msg.message_id
+                context.bot_data['schedule_messages'][date_part + '_text'] = day_schedule
+
+                # между отправкой сообщений с расписанием пауза 5 секунд
+                # нужно, чтобы телеграм не блокировал за флуд (~20 сообщений в минуту предел)
+                await asyncio.sleep(3.1)
+
             except Exception as e:
                 print(f"Ошибка отправки: {e}")
                 try:
-                    await update.message.reply_text(day_schedule, parse_mode=None)
+                    await asyncio.sleep(5)
+                    #await update.message.reply_text(day_schedule, parse_mode=None)  #Заменить на:
+                    await context.bot.send_message(
+                        chat_id=SZTN_CHAT_ID,
+                        message_thread_id=SCHEDULE_THREAD_ID,
+                        text=day_schedule,
+                        parse_mode=None
+                    )
                     sent_count += 1
                 except:
                     pass
@@ -131,6 +165,70 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await loading_msg.delete()
         await update.message.reply_text(f"❌ Ошибка: {type(e).__name__}: {e}")
+
+async def edit_schedule_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📅 Введите дату в формате 'число месяц', например: 5 апреля\n"
+    )
+    return WAITING_DATE
+
+async def process_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    date_input = update.message.text.strip()
+    normalized = date_input.lower()  # например, "5 апреля"
+    
+    schedule_messages = context.bot_data.get('schedule_messages', {})
+    msg_id = schedule_messages.get(normalized)
+    msg_text = schedule_messages.get(normalized + '_text')
+    
+    if not msg_id or not msg_text:
+        await update.message.reply_text("❌ Не найдено расписание на эту дату.\n")
+        return ConversationHandler.END
+    
+    # Сохраняем ID сообщения и дату для следующего шага
+    context.user_data['edit_msg_id'] = msg_id
+    context.user_data['edit_date_norm'] = normalized   # нормализованная дата (ключ)
+    context.user_data['edit_date_raw'] = date_input    # исходный ввод (для красоты)
+    
+    await update.message.reply_text(
+        f"📝 Текущее расписание на {date_input}:\n\n{msg_text}\n\n"
+        "✏️ Отправьте **новый** текст сообщения (можно скопировать и изменить)."
+    )
+    return WAITING_NEW_TEXT
+
+async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    new_text = update.message.text
+    if len(new_text) > 4096:
+        await update.message.reply_text("❌ Текст слишком длинный (макс. 4096 символов).")
+        return WAITING_NEW_TEXT  # остаёмся в том же состоянии
+    msg_id = context.user_data.get('edit_msg_id')
+    norm_date = context.user_data.get('edit_date_norm')
+    
+    if not msg_id or not norm_date:
+        await update.message.reply_text("❌ Ошибка: не найдены данные о сообщении. Попробуйте заново.")
+        return ConversationHandler.END
+    
+    try:
+        # Редактируем сообщение в супергруппе
+        await context.bot.edit_message_text(
+            chat_id=SZTN_CHAT_ID,
+            message_id=msg_id,
+            text=new_text,
+            api_kwargs={'message_thread_id': SCHEDULE_THREAD_ID}
+        )
+        # Обновляем кеш в памяти
+        context.bot_data['schedule_messages'][norm_date + '_text'] = new_text
+        # Если позже добавите файловое сохранение, здесь вызовите save_cache()
+        
+        await update.message.reply_text("✅ Расписание успешно обновлено в группе!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка при замене: {e}")
+    
+    # Очищаем временные данные
+    context.user_data.pop('edit_msg_id', None)
+    context.user_data.pop('edit_date_norm', None)
+    context.user_data.pop('edit_date_raw', None)
+    
+    return ConversationHandler.END
 
 async def report_error(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -179,6 +277,10 @@ async def handle_report_message(update: Update, context: ContextTypes.DEFAULT_TY
         )
         print(f"Ошибка отправки репорта: {e}")
 
+async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Редактирование отменено.")
+    return ConversationHandler.END
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
 
@@ -190,10 +292,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_schedule(update, context)
     elif text == "📝 Сообщить об ошибке":
         await report_error(update, context)
+    elif text == "✍️ Изменить расписание":
+        return
     else:
         await update.message.reply_text(
             "Используйте кнопки внизу экрана:\n"
             "📅 Вывести расписание\n"
+            "✍️ Изменить расписание\n"
             "📝 Сообщить об ошибке",
             reply_markup=get_main_keyboard()
         )
@@ -210,6 +315,20 @@ app = Application.builder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("cancel", cancel_command))
+
+# НОВОЕ. Надо для изменения расписания.
+# я пока не разбирал вот эту писанину:
+edit_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex('^✍️ Изменить расписание$'), edit_schedule_start)],
+    states={
+        WAITING_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_date)],
+        WAITING_NEW_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, replace_schedule_message)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel_edit)],
+)
+app.add_handler(edit_conv_handler)
+# неразобранная писанина заканчивается тут.
+
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 print("✅ Бот запущен!")
