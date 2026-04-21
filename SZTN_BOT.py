@@ -6,6 +6,7 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import asyncio
 import re
+import json
 
 # Токен из переменных окружения (безопасно для сервера)
 BOT_TOKEN = "8649563055:AAHEJP6eXq-q0nOsrFe7PBUIZ6X_q9pWeOY"
@@ -18,12 +19,36 @@ SCHEDULE_THREAD_ID = 6      #<-- сюда ID конкретной ветки
 # состояния для изменения (редактирования) расписания
 WAITING_DATE, WAITING_NEW_TEXT = range(2)
 
+# для хранения данных расписания в файле. Чтобы были не страшны перезапуски бота
+CACHE_FILE = Path(__file__).parent / "schedule_cache.json"
+
+def load_cache():
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            print("⚠️ Ошибка чтения файла кеша. Будет создан новый.")
+    return {}
+
+def save_cache(cache_data):
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+    except IOError as e:
+        print(f"⚠️ Ошибка сохранения кеша: {e}")
+
 def get_main_keyboard():
     keyboard = [
         [KeyboardButton("📅 Вывести расписание")],
         [KeyboardButton("✍️ Изменить расписание")],
         [KeyboardButton("📝 Сообщить об ошибке")]
     ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+# кнопка отмены текущей операции
+def get_cancel_keyboard():
+    keyboard = [[KeyboardButton("❌ Отмена")]]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 def split_by_dates(text: str):
@@ -155,6 +180,9 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     sent_count += 1
                 except:
                     pass
+        
+        # сохраняем кеш в файл после отправки всех сообщений
+        save_cache(context.bot_data['schedule_messages'])
 
         if sent_count == 0:
             await update.message.reply_text("❌ Не удалось отправить расписание")
@@ -168,12 +196,19 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit_schedule_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📅 Введите дату в формате 'число месяц', например: 5 апреля\n"
+        "📅 Введите дату в формате 'число месяц', например: 5 апреля\n\n"
+        "Для отмены нажмите кнопку «❌ Отмена».",
+        reply_markup=get_cancel_keyboard()
     )
     return WAITING_DATE
 
 async def process_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     date_input = update.message.text.strip()
+
+    if date_input == "❌ Отмена":
+        await cancel_edit(update, context)
+        return ConversationHandler.END
+
     normalized = date_input.lower()  # например, "5 апреля"
     
     schedule_messages = context.bot_data.get('schedule_messages', {})
@@ -191,7 +226,8 @@ async def process_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"📝 Текущее расписание на {date_input}:\n\n{msg_text}\n\n"
-        "✏️ Отправьте **новый** текст сообщения (можно скопировать и изменить)."
+        "✏️ Отправьте **новый** текст сообщения (можно скопировать и изменить).",
+        reply_markup=get_cancel_keyboard()
     )
     return WAITING_NEW_TEXT
 
@@ -200,6 +236,11 @@ async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT
     if len(new_text) > 4096:
         await update.message.reply_text("❌ Текст слишком длинный (макс. 4096 символов).")
         return WAITING_NEW_TEXT  # остаёмся в том же состоянии
+
+    if new_text == "❌ Отмена":
+        await cancel_edit(update, context)
+        return ConversationHandler.END
+    
     msg_id = context.user_data.get('edit_msg_id')
     norm_date = context.user_data.get('edit_date_norm')
     
@@ -217,9 +258,12 @@ async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT
         )
         # Обновляем кеш в памяти
         context.bot_data['schedule_messages'][norm_date + '_text'] = new_text
-        # Если позже добавите файловое сохранение, здесь вызовите save_cache()
+        save_cache(context.bot_data['schedule_messages'])
         
-        await update.message.reply_text("✅ Расписание успешно обновлено в группе!")
+        await update.message.reply_text(
+            "✅ Расписание успешно обновлено в группе!",
+            reply_markup=get_main_keyboard()
+        )
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка при замене: {e}")
     
@@ -278,7 +322,10 @@ async def handle_report_message(update: Update, context: ContextTypes.DEFAULT_TY
         print(f"Ошибка отправки репорта: {e}")
 
 async def cancel_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Редактирование отменено.")
+    await update.message.reply_text(
+        "❌ Редактирование отменено.",
+        reply_markup=get_main_keyboard()
+    )
     return ConversationHandler.END
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -312,6 +359,10 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Создаём приложение
 app = Application.builder().token(BOT_TOKEN).build()
+
+# Загружаем сохранённый кеш расписаний
+app.bot_data['schedule_messages'] = load_cache()
+print(f"📦 Загружено {len(app.bot_data['schedule_messages'])} записей кеша")
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("cancel", cancel_command))
