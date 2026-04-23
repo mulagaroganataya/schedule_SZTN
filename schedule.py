@@ -29,8 +29,25 @@ DAYS = {
     "пт": "пятница", "сб": "суббота", "вс": "воскресенье"}
 
 DEFAULT_TIME = {
-    "ОС": "17:10", "МС": "18:10", "НП": "17:20"
-}
+    "ОС": "17:10", "МС": "18:10", "НП": "17:20"}
+
+SPECTACLE_DURATION = {}
+
+def fill_spectacle_duration():
+    global SPECTACLE_DURATION
+    df = get_second_table_data()  
+    for row_idx in range(1, len(df)):
+        row = df.iloc[row_idx]
+        spectacle = row[0]
+        duration = row[1]
+        if pd.isna(spectacle) or str(spectacle).strip() == "":
+            continue
+        spectacle_name = f"\"{str(spectacle).strip()}\""
+        if pd.isna(duration):
+            duration_value = "(??)"
+        else:
+            duration_value = str(duration).strip()
+        SPECTACLE_DURATION[spectacle_name] = f"({duration_value})"
 
 def load_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
     url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
@@ -201,8 +218,9 @@ def get_second_table_data():
 
 #Тест
 if __name__ == "__main__":
-    data = get_actual_schedule()
+    fill_spectacle_duration()
 
+    data = get_actual_schedule()
     sorted_data = dict(sorted(data.items(), key=lambda x: int(x[0].split()[0])))
 
     for date, shows in sorted_data.items():
@@ -213,7 +231,8 @@ if __name__ == "__main__":
         print(f"\n{date.lower()}, {day_of_week}")
 
         for show in shows:
-            print(f"\n{show['scene']} {show['time']} {show['title']}") #выводит сцену и название спектакля
+            duration = SPECTACLE_DURATION.get(show['title'], "(??)")
+            print(f"\n{show['scene']} {show['time']} {show['title']} {duration}") #выводит сцену и название спектакля
             count_all = 0   #для подсчёта текущего количества сотрудников на смене
             count_seniors = 0   #для подстчёта количества старших сотрудников на смене
 
