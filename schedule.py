@@ -44,7 +44,7 @@ def fill_spectacle_duration():
             continue
         spectacle_name = f"\"{str(spectacle).strip()}\""
         if pd.isna(duration):
-            duration_value = "(??)"
+            duration_value = "??"
         else:
             duration_value = str(duration).strip()
         SPECTACLE_DURATION[spectacle_name] = f"({duration_value})"
