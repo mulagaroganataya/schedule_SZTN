@@ -20,11 +20,19 @@ SCHEDULE_THREAD_ID = 6      #<-- сюда ID конкретной ветки
 WAITING_DATE, WAITING_NEW_TEXT = range(2)
 # состояние ожидания нового id темы
 WAITING_THREAD_ID = range(3,4)
+# состояние ожидания нового id листа (gid)
+WAITING_GID = range(4,5)
+#состояние для ожидания нового месяца
+WAITING_MONTH = range(5,6)
 
 # для хранения данных расписания в файле. Чтобы были не страшны перезапуски бота
 CACHE_FILE = Path(__file__).parent / "schedule_cache.json"
 #анал-но с конфигом
 CONFIG_FILE = Path(__file__).parent / "config.json"
+
+MONTHS_CHANGE = {
+    "январь": 1, "февраль": 2, "март": 3, "апрель": 4, "май": 5, "июнь": 6,
+    "июль": 7, "август": 8, "сентябрь": 9, "октябрь": 10, "ноябрь": 11, "декабрь": 12}
 
 def load_cache():
     if CACHE_FILE.exists():
@@ -43,13 +51,37 @@ def save_cache(cache_data):
         print(f"⚠️ Ошибка сохранения кеша: {e}")
 
 def load_config():
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            print("⚠️ Ошибка чтения config.json, используются значения по умолчанию")
-    return {"thread_id": 6}
+    defaults = {
+        "thread_id": 6,
+        "current_gid": "876965220",
+        "current_month": 4
+    }
+    
+    if not CONFIG_FILE.exists():
+        # Файла нет — создаём с дефолтами и сохраняем
+        save_config(defaults)
+        return defaults.copy()
+    
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        print("⚠️ Ошибка чтения config.json, используются значения по умолчанию")
+        save_config(defaults)
+        return defaults.copy()
+    
+    # Обновляем недостающие ключи из defaults
+    updated = False
+    for key, default_value in defaults.items():
+        if key not in config:
+            config[key] = default_value
+            updated = True
+    
+    if updated:
+        save_config(config)  # сохраняем дополненный конфиг
+        print(f"✅ Добавлены недостающие ключи в config.json")
+    
+    return config
 
 def save_config(config):
     try:
@@ -69,6 +101,8 @@ def get_main_keyboard():
 
 def get_settings_keyboard():
     keyboard = [
+        [KeyboardButton("🔧 Изменить лист таблицы")],
+        [KeyboardButton("🔧 Изменить текущий месяц")],
         [KeyboardButton("🔧 Изменить тему для отправки сообщений")],
         [KeyboardButton("🔙 Назад")]
     ]
@@ -131,6 +165,112 @@ async def process_thread_input(update: Update, context: ContextTypes.DEFAULT_TYP
 async def cancel_change_thread(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "❌ Изменение ID темы отменено.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
+
+def extract_gid_from_input(text: str):
+    text = text.strip()
+    if text.isdigit():
+        return text
+    import re
+    match = re.search(r'[#&]gid=(\d+)', text)
+    if match:
+        return match.group(1)
+    return None
+
+async def change_gid_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔧 Введите новый ID листа (число) или ссылку на лист Google-таблицы.\n\n"
+        "Примеры:\n"
+        "876965220\n"
+        "https://docs.google.com/spreadsheets/d/.../edit#gid=876965220\n"
+        "https://docs.google.com/spreadsheets/d/.../export?format=csv&gid=876965220",
+        reply_markup=get_cancel_keyboard()
+    )
+    return WAITING_GID
+
+async def process_gid_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.strip()
+    if user_input == "❌ Отмена":
+        await cancel_change_gid(update, context)
+        return ConversationHandler.END
+
+    gid = extract_gid_from_input(user_input)
+    if gid is None:
+        await update.message.reply_text(
+            "❌ Не удалось распознать ID листа.\n"
+            "Введите число или ссылку, содержащую gid=...",
+            reply_markup=get_cancel_keyboard()
+        )
+        return WAITING_GID
+
+    config = load_config()
+    config["current_gid"] = gid
+    save_config(config)
+
+    await update.message.reply_text(
+        f"✅ ID листа успешно изменён на {gid}.\n"
+        f"Новое расписание будет загружаться из этого листа.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
+
+async def cancel_change_gid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "❌ Изменение листа таблицы отменено.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
+
+def extract_month_from_input(text: str):
+    text = text.strip().lower()
+    if text.isdigit():
+        month_num = int(text)
+        if 1 <= month_num <= 12:
+            return month_num
+    for name, num in MONTHS_CHANGE.items():
+        if name in text:
+            return num
+    return None
+
+async def change_month_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🔧 Введите номер месяца (1–12) или название месяца (например, «апрель», «май»).\n\n"
+        "Примеры: 4  или  апрель",
+        reply_markup=get_cancel_keyboard()
+    )
+    return WAITING_MONTH
+
+async def process_month_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_input = update.message.text.strip()
+    if user_input == "❌ Отмена":
+        await cancel_change_month(update, context)
+        return ConversationHandler.END
+
+    month_num = extract_month_from_input(user_input)
+    if month_num is None:
+        await update.message.reply_text(
+            "❌ Не удалось распознать месяц.\n"
+            "Введите число от 1 до 12 или название месяца (например, 4 или «апрель»).",
+            reply_markup=get_cancel_keyboard()
+        )
+        return WAITING_MONTH
+
+    config = load_config()
+    config["current_month"] = month_num
+    save_config(config)
+    
+    await update.message.reply_text(
+        f"✅ Месяц успешно изменён на {month_num} ({MONTHS_CHANGE.get(month_num, '?')}).\n"
+        f"Этот месяц будет отображаться в новом расписании.",
+        reply_markup=get_settings_keyboard()
+    )
+    return ConversationHandler.END
+
+async def cancel_change_month(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "❌ Изменение месяца отменено.",
         reply_markup=get_settings_keyboard()
     )
     return ConversationHandler.END
@@ -231,7 +371,6 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 day_schedule = day_schedule[:4000] + "\n\n... (текст обрезан)"
 
             try:
-                #await update.message.reply_text(day_schedule)   #заменить на:
                 sent_msg = await context.bot.send_message(
                     chat_id=SZTN_CHAT_ID,
                     message_thread_id=SCHEDULE_THREAD_ID,
@@ -435,7 +574,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=get_main_keyboard()
             )
         else:
-            if text != "🔧 Изменить тему для отправки сообщений":
+            allowed_buttons = ["🔧 Изменить лист таблицы", "🔧 Изменить текущий месяц", "🔧 Изменить тему для отправки сообщений", "🔙 Назад"]
+            if text not in allowed_buttons:
                 await update.message.reply_text(
                     "Используйте кнопки меню настроек.",
                     reply_markup=get_settings_keyboard()
@@ -509,6 +649,30 @@ thread_conv_handler = ConversationHandler(
     fallbacks=[CommandHandler('cancel', cancel_change_thread)],
 )
 app.add_handler(thread_conv_handler)
+# неразобранная писанина заканчивается тут.
+
+# НОВОЕ. Надо для изменения gid листа таблицы
+# я пока не разбирал вот эту писанину:
+gid_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex('^🔧 Изменить лист таблицы$'), change_gid_start)],
+    states={
+        WAITING_GID: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_gid_input)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel_change_gid)],
+)
+app.add_handler(gid_conv_handler)
+# неразобранная писанина заканчивается тут.
+
+# НОВОЕ. Надо для изменения месяца
+# я пока не разбирал вот эту писанину:
+month_conv_handler = ConversationHandler(
+    entry_points=[MessageHandler(filters.Regex('^🔧 Изменить текущий месяц$'), change_month_start)],
+    states={
+        WAITING_MONTH: [MessageHandler(filters.TEXT & ~filters.COMMAND, process_month_input)],
+    },
+    fallbacks=[CommandHandler('cancel', cancel_change_month)],
+)
+app.add_handler(month_conv_handler)
 # неразобранная писанина заканчивается тут.
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

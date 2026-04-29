@@ -3,6 +3,9 @@ import sys
 import io
 import pandas as pd
 import requests
+import json
+#import SZTN_BOT
+from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
@@ -70,6 +73,21 @@ def load_second_sheet_from_google(sheet_id: str, gid: str) -> pd.DataFrame:
     response.encoding = "utf-8"
     df = pd.read_csv(io.StringIO(response.text), header=None)
     return df
+
+def load_schedule_config():
+    config_file = Path(__file__).parent / "config.json"
+    default_gid = "876965220"
+    default_month = 4
+    if not config_file.exists():
+        return default_gid, default_month
+    try:
+        with open(config_file, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    except:
+        return default_gid, default_month
+    gid = config.get("current_gid", default_gid)
+    month = config.get("current_month", default_month)
+    return str(gid), int(month)
 
 def is_work(value):
     if pd.isna(value):
@@ -197,13 +215,8 @@ def get_schedule_data(sheet_id: str, gid: str, month: int) -> dict:
     return all_schedule
 
 def get_actual_schedule() -> dict:
-
-    # Чтобы сменить лист — надо менять current_gid и current_month
-
-    sheet_id = "1B07yLkFHGKKdkXz9c1lmxcGZYjmD7gMKXFU9Ds-_Va0" # таблица
-    current_gid = "876965220"  # Рабочие дни Апрель 26
-    current_month = 4
-
+    current_gid, current_month = load_schedule_config()
+    sheet_id = "1B07yLkFHGKKdkXz9c1lmxcGZYjmD7gMKXFU9Ds-_Va0"
     return get_schedule_data(sheet_id, current_gid, current_month)
 
 def get_second_table_data():
