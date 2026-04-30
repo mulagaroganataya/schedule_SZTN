@@ -126,6 +126,7 @@ def extract_thread_id_from_input(text: str):
     return None
 
 async def change_thread_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_settings'] = False
     await update.message.reply_text(
         "🔧 Введите новый ID темы (число) или ссылку на сообщение в теме.\n"
         "Примеры: 6  или  https://t.me/c/123456789/10",
@@ -180,6 +181,7 @@ def extract_gid_from_input(text: str):
     return None
 
 async def change_gid_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_settings'] = False
     await update.message.reply_text(
         "🔧 Введите новый ID листа (число) или ссылку на лист Google-таблицы.\n\n"
         "Примеры:\n"
@@ -235,6 +237,7 @@ def extract_month_from_input(text: str):
     return None
 
 async def change_month_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_settings'] = False
     await update.message.reply_text(
         "🔧 Введите номер месяца (1–12) или название месяца (например, «апрель», «май»).\n\n"
         "Примеры: 4  или  апрель",
@@ -419,6 +422,7 @@ async def show_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Ошибка: {type(e).__name__}: {e}")
 
 async def edit_schedule_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_settings'] = False
     await update.message.reply_text(
         "📅 Введите дату в формате 'число месяц', например: 5 апреля\n\n"
         "Для отмены нажмите кнопку «❌ Отмена».",
@@ -449,10 +453,11 @@ async def process_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['edit_date_raw'] = date_input    # исходный ввод (для красоты)
     
     await update.message.reply_text(
-        f"📝 Текущее расписание на {date_input}:\n\n{msg_text}\n\n"
+        f"📝 Текущее расписание на {date_input} 👇\n"
         "✏️ Отправьте **новый** текст сообщения (можно скопировать и изменить).",
         reply_markup=get_cancel_keyboard()
     )
+    await update.message.reply_text(msg_text)
     return WAITING_NEW_TEXT
 
 async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -472,7 +477,7 @@ async def replace_schedule_message(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ Ошибка: не найдены данные о сообщении. Попробуйте заново.")
         return ConversationHandler.END
     
-    # используем thread_id темы для конкретного сообщегния, чтобы не завичсеть от глобального значения
+    # используем thread_id темы для конкретного сообщегния, чтобы не зависеть от глобального значения
     schedule_messages = context.bot_data.get('schedule_messages', {})
     saved_thread_id = schedule_messages.get(norm_date + '_thread_id')
     if saved_thread_id is None:

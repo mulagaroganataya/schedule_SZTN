@@ -237,6 +237,14 @@ if __name__ == "__main__":
     sorted_data = dict(sorted(data.items(), key=lambda x: int(x[0].split()[0])))
 
     for date, shows in sorted_data.items():
+
+        # Думаю, тут проверку на выходной
+        # *вывод даты, если оная существует*
+        # if *спектаклей в эту дату нет*:
+            # print(\nf"ВЫХОДНОЙ")
+            # continue
+
+        # блок ниже вероятно придётся изменить или удалить
         if shows:
             day_of_week = shows[0]['day of week']
         else:
